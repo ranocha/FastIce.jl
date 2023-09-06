@@ -1,7 +1,6 @@
 using KernelAbstractions
 using MPI
-using CUDA
-using NVTX
+using AMDGPU
 
 include("mpi_utils.jl")
 include("mpi_utils2.jl")
@@ -72,7 +71,7 @@ function main(backend = CPU(), T::DataType = Float64, dims = (0, 0, 0))
     return
 end
 
-backend = CUDABackend()
+backend = ROCBackend()
 T::DataType = Int
 dims = (0, 0, 1)
 

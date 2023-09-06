@@ -56,7 +56,7 @@ function main(backend=CPU(), T::DataType=Float64, dims=(0, 0, 0))
             range  = ranges[2*(dim-1) + side]
             offset, ndrange = first(range), size(range)
             Exchanger(backend, comm, rank, halo, border) do compute_bc
-                NVTX.@range "borders" diffusion_kernel!(backend, 256)(A_new, A, h, _dx, _dy, _dz, offset; ndrange)
+                diffusion_kernel!(backend, 256)(A_new, A, h, _dx, _dy, _dz, offset; ndrange)
                 if compute_bc
                     # apply_bcs!(Val(dim), fields, bcs.velocity)
                 end
@@ -67,23 +67,23 @@ function main(backend=CPU(), T::DataType=Float64, dims=(0, 0, 0))
     ### to be hidden later
 
     # actions
-    CUDA.Profile.start()
     for it = 1:nt
         # copyto!(A, A_new)
-        NVTX.@range "step $it" begin
-            NVTX.@range "inner" diffusion_kernel!(backend, 256)(A_new, A, h, _dx, _dy, _dz, first(ranges[end]); ndrange=size(ranges[end]))
-            for dim in reverse(eachindex(neighbors))
-                notify.(exchangers[dim])
-                wait.(exchangers[dim])
-            end
-            KernelAbstractions.synchronize(backend)
+        diffusion_kernel!(backend, 256)(A_new, A, h, _dx, _dy, _dz, first(ranges[end]); ndrange=size(ranges[end]))
+        for dim in reverse(eachindex(neighbors))
+            notify.(exchangers[dim])
+            wait.(exchangers[dim])
         end
+        KernelAbstractions.synchronize(backend)
     end
-    CUDA.Profile.stop()
 
     # for dim in eachindex(neighbors)
     #     setdone!.(exchangers[dim])
     # end
+
+    # A_g = (me==0) ? allocate(CPU(), dtype, nx_g, ny_g) : nothing
+    # A_i = Array(A_new[2:end-1, 2:end-1, 2:end-1])
+    # gather!(A_g, A_i, comm)
 
     # @info "visu"
     # fig = Figure(resolution=(1000,1000), fontsize=32)
@@ -97,7 +97,7 @@ function main(backend=CPU(), T::DataType=Float64, dims=(0, 0, 0))
     return
 end
 
-backend = CUDABackend()
+backend = ROCBackend()
 T::DataType = Float64
 dims = (0, 0, 1)
 

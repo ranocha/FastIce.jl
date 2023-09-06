@@ -13,9 +13,10 @@ function init_distributed(dims::Tuple=(0, 0, 0); init_MPI=true)
     # create communicator for the node and select device
     comm_node = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, me)
     dev_id = MPI.Comm_rank(comm_node)
-    @show CUDA.device!(dev_id)
-    # @show AMDGPU.default_device_id!(dev_id + 1) # DEBUG: why default ???
-    # @show AMDGPU.device_id!(dev_id + 1)
+    # @show CUDA.device!(dev_id)
+    # @show AMDGPU.default_device_id!(dev_id + 1)
+    @show AMDGPU.device_id!(dev_id + 1)
+    # @show AMDGPU.device_id!(2)
     return (dims, comm, me, neighbors, coords)
 end
 
@@ -57,23 +58,21 @@ mutable struct Exchanger
             try
                 while !(@atomic this.done)
                     wait(top)
-                    NVTX.@mark "after wait(top)"
                     if has_neighbor
                         recv = MPI.Irecv!(recv_buf, comm; source=rank)
                     end
                     f(compute_bc)
                     if has_neighbor
                         copyto!(send_buf, border)
+                        @show border # something is needed here as it seems async in previous line...
                         send = MPI.Isend(send_buf, comm; dest=rank)
                         cooperative_test!(recv)
                         copyto!(halo, recv_buf)
                         cooperative_test!(send)
                     end
                     notify(bottom)
-                    NVTX.@mark "after notify(bottom)"
                 end
             catch err
-                @show err
                 @atomic this.done = true
                 @atomic this.err = err
             end
