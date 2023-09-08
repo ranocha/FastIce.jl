@@ -14,24 +14,13 @@ function init_distributed(dims::Tuple=(0, 0, 0); init_MPI=true)
     comm_node = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, me)
     dev_id = MPI.Comm_rank(comm_node)
     # @show CUDA.device!(dev_id)
-    # @show AMDGPU.default_device_id!(dev_id + 1)
     @show AMDGPU.device_id!(dev_id + 1)
-    # @show AMDGPU.device_id!(2)
-    return (dims, comm, me, neighbors, coords)
+    return (dims, comm, me, neighbors, coords, dev_id)
 end
 
 function finalize_distributed(; finalize_MPI=true)
     finalize_MPI && MPI.Finalize()
     return
-end
-
-# TODO: Implement in MPI.jl
-function cooperative_test!(req)
-    done = false
-    while !done
-        done, _ = MPI.Test(req, MPI.Status)
-        yield()
-    end
 end
 
 # exchanger
@@ -42,7 +31,7 @@ mutable struct Exchanger
     @atomic err
     task::Task
 
-    function Exchanger(f::F, backend::Backend, comm, rank, halo, border) where F
+    function Exchanger(f::F, backend::Backend, comm, rank, dev_id, halo, border) where F
         top    = Base.Event(#=autoreset=# true)
         bottom = Base.Event(#=autoreset=# true)
 
@@ -54,6 +43,7 @@ mutable struct Exchanger
         compute_bc   = !has_neighbor
 
         this.task = Threads.@spawn begin
+            AMDGPU.device_id!(dev_id + 1)
             KernelAbstractions.priority!(backend, :high)
             try
                 while !(@atomic this.done)
@@ -63,16 +53,18 @@ mutable struct Exchanger
                     end
                     f(compute_bc)
                     if has_neighbor
-                        copyto!(send_buf, border)
-                        @show border # something is needed here as it seems async in previous line...
+                        KernelAbstractions.copyto!(backend, send_buf, border)
+                        KernelAbstractions.synchronize(backend)
                         send = MPI.Isend(send_buf, comm; dest=rank)
-                        cooperative_test!(recv)
-                        copyto!(halo, recv_buf)
-                        cooperative_test!(send)
+                        wait(recv) # Base.wait
+                        KernelAbstractions.copyto!(backend, halo, recv_buf)
+                        KernelAbstractions.synchronize(backend)
+                        wait(send) # Base.wait
                     end
                     notify(bottom)
                 end
             catch err
+                @show err
                 @atomic this.done = true
                 @atomic this.err = err
             end

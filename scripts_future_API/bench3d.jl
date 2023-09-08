@@ -1,7 +1,7 @@
 using KernelAbstractions
 using MPI
-using CUDA
-using NVTX
+using AMDGPU
+
 # using CairoMakie
 
 include("mpi_utils.jl")
@@ -24,9 +24,9 @@ function main(backend=CPU(), T::DataType=Float64, dims=(0, 0, 0))
     l = 10.0
     # numerics
     nt = 10
-    nx, ny, nz = 512, 512, 512
+    nx, ny, nz = 1024, 1024, 1024
     b_width = (16, 8, 4)
-    dims, comm, me, neighbors, coords = init_distributed(dims; init_MPI=true)
+    dims, comm, me, neighbors, coords, dev_id = init_distributed(dims; init_MPI=true)
     dx, dy, dz = l ./ (nx, ny, nz)
     _dx, _dy, _dz = 1.0 ./ (dx, dy, dz)
     h = min(dx, dy ,dz)^2 / 6.1
@@ -55,7 +55,7 @@ function main(backend=CPU(), T::DataType=Float64, dims=(0, 0, 0))
             border = get_send_view(Val(side), Val(dim), A_new)
             range  = ranges[2*(dim-1) + side]
             offset, ndrange = first(range), size(range)
-            Exchanger(backend, comm, rank, halo, border) do compute_bc
+            Exchanger(backend, comm, rank, dev_id, halo, border) do compute_bc
                 diffusion_kernel!(backend, 256)(A_new, A, h, _dx, _dy, _dz, offset; ndrange)
                 if compute_bc
                     # apply_bcs!(Val(dim), fields, bcs.velocity)
