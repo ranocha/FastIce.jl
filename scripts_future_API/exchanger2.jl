@@ -22,7 +22,7 @@ end
 function main(backend = CPU(), T::DataType = Float64, dims = (0, 0, 0))
 
     # numerics
-    dims, comm, me, neighbors, coords = init_distributed(dims; init_MPI=true)
+    dims, comm, me, neighbors, coords, dev_id = init_distributed(dims; init_MPI=true)
 
     nx, ny, nz = 6, 6, 6
     b_width = (2, 2, 2)
@@ -40,7 +40,7 @@ function main(backend = CPU(), T::DataType = Float64, dims = (0, 0, 0))
             border = get_send_view(Val(side), Val(dim), A)
             range  = ranges[2*(dim-1) + side]
             offset, ndrange = first(range), size(range)
-            Exchanger(backend, comm, rank, halo, border) do compute_bc
+            Exchanger(backend, comm, rank, dev_id, halo, border) do compute_bc
                 do_work!(backend, 256)(A, me, offset; ndrange)
                 if compute_bc
                     # apply_bcs!(Val(dim), fields, bcs.velocity)
